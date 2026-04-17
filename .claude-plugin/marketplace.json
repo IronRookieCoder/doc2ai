@@ -1,0 +1,17 @@
+{
+  "name": "doc2ai-marketplace",
+  "owner": {
+    "name": "demo"
+  },
+  "metadata": {
+    "description": "doc2ai marketplace entry for converting office documents into AI-friendly Markdown and CSV formats",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "doc2ai",
+      "description": "Document conversion plugin that converts doc/docx files to structured Markdown and xlsx workbooks to AI-friendly CSV collections",
+      "source": "./"
+    }
+  ]
+}

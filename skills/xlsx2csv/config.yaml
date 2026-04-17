@@ -1,0 +1,31 @@
+version: 1
+
+conversion:
+  # 保留原始网格：空白单元格、空白行、空白列都保留
+  keep_original_grid: true
+  preserve_blank_cells: true
+  preserve_blank_rows: true
+  preserve_blank_columns: true
+
+  # 不补全合并单元格（合并区域只有左上角有值）
+  fill_merged_cells: false
+
+  # 不推断表头，不做语义归一化
+  infer_headers: false
+  normalize_rows: false
+
+sheet:
+  # 不导出隐藏的工作表
+  include_hidden_sheets: false
+
+index:
+  # 索引 CSV 包含的字段
+  fields:
+    - sheet_order
+    - sheet_name
+    - export_file
+    - used_range
+
+output:
+  # UTF-8 with BOM，确保中文在 Excel 中直接打开不乱码
+  encoding: utf-8-sig
