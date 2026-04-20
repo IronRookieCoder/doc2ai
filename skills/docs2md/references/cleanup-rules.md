@@ -32,5 +32,6 @@
 
 - Pandoc 对 docx 列表和简单表格的转换通常可靠，无需额外规则清洗
 - Pandoc 在表格单元格中使用 `<br>` 标签表示行内换行，属于合法 GFM 格式，不做清除
-- 合并单元格的复杂表格，Pandoc 可能输出不规则的管线表格或丢失合并信息——脚本阶段不做修正，交由 AI 阶段在语义层面判断和修复
-- 若 Pandoc 在正文区域输出旧式格式表格（`--- ---` 分隔符而非 GFM 管线格式），脚本阶段不做格式转换，交由 AI 后处理阶段判断和修复
+- 阶段1 在 Pandoc 转换时加载 `scripts/gfm-table-normalize.lua`，将 Pandoc `Table` AST 统一输出为 GFM pipe table
+- 合并单元格的复杂表格会压平为规则矩形：左上角保留内容，其余覆盖位置补空；这是 GFM pipe table 表达能力限制导致的降级
+- 若正文区域仍残留 grid table、old-style table 或 HTML `<table>`，视为脚本异常残留，交由阶段2 AI 判断是否可机械修正或记录到 `attention`

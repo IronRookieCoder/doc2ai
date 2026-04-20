@@ -2,7 +2,7 @@
 name: docs2md
 description: >
   将企业级 .doc/.docx 文档（IPD 体系需求规格说明书、概要设计说明书等）转换为 AI 可读的结构化 Markdown。
-  采用两阶段管道：阶段1 用 Pandoc + Python 正则脚本做机械清洗，阶段2 由 AI 做语义优化。
+  采用两阶段管道：阶段1 用 Pandoc + Lua filter + Python 正则脚本做机械清洗，阶段2 由 AI 做语义优化。
   当用户提到"docx 转 markdown""doc 转 markdown""文档转换""docx2md""把 word 转成 md""转换需求文档""转换设计文档"时触发。
   即使用户只是说"帮我转一下这个 doc/docx"或给出一个 .doc/.docx 文件路径，也应触发此 skill。
   不要用于创建或编辑 Word 文档——此 skill 只做 doc/docx → markdown 方向的转换。
@@ -20,14 +20,14 @@ description: >
 .doc
   → 预处理（脚本）: 调用 `scripts/doc_to_docx_wps.py` 另存为 `.docx`
 .docx
-  → 阶段1（脚本）: Pandoc 转换 + 正则清洗  →  .md + .scan.json
+  → 阶段1（脚本）: Pandoc 转换 + 表格标准化 + 正则清洗  →  .md + .scan.json
   → 阶段2（AI）:  靶向语义优化（仅修改风险标记区域）
   → 清理：删除 .scan.json
 ```
 
 ## 前置依赖
 
-- **Pandoc**：必须已安装并在 PATH 中可用（`pandoc --version` 可执行）
+- **Pandoc**：必须已安装并在 PATH 中可用（`pandoc --version` 可执行），且支持 Lua filter
 - **Python 3** + `pyyaml`：如缺少则 `pip install pyyaml`
 
 如果 Pandoc 不可用，告知用户安装后重试。
@@ -68,7 +68,7 @@ python <skill-path>/scripts/docs2md.py <input.doc|input.docx> -o md/ --report
 
 脚本会：
 1. 如果原文件是 `.doc`，先调用 `scripts/doc_to_docx_wps.py` 另存为 `.docx`，并保留该 `.docx`
-2. 调用 Pandoc 做粗转换
+2. 调用 Pandoc 做粗转换，并通过 `scripts/gfm-table-normalize.lua` 将表格标准化为 GFM pipe table
 3. 从 TOC 提取标题编号映射
 4. 移除前页（封面、审批表、修订记录、目录）
 5. 执行正则清洗（噪音移除、实体处理、标题空白规范化）
@@ -122,8 +122,9 @@ python <skill-path>/scripts/docs2md.py <input.doc|input.docx> -o md/ --report
      （两行在语义上构成连续表述，且前行无终结标点、后行非结构标记开头），
      若是则用 Edit 工具合并（将换行替换为空格或直接拼接）
 
-   - **grid_table / old_style_table**：读取完整表格区域，
-     用 Edit 替换为 GFM pipe table 格式
+   - **grid_table / old_style_table**：脚本阶段表格标准化后的异常残留。
+     读取完整表格区域；若能确认是简单残留且不改变实质内容，可用 Edit 修正为 GFM pipe table；
+     若涉及复杂合并关系或无法确认，保留原文并记入 `attention`
 
    - **heading_jump**：检查上下文确认是否为真正跳级，
      若确认则用 Edit 修正标题层级
@@ -131,7 +132,8 @@ python <skill-path>/scripts/docs2md.py <input.doc|input.docx> -o md/ --report
    - **pandoc_annotation / image_remnant / anchor_remnant**：
      用 Edit 删除残留噪音
 
-   - **table_alignment**：用 Edit 修正列对齐
+   - **table_alignment**：脚本阶段表格标准化后的异常残留。
+     仅在列数错误明确且可机械修正时用 Edit 修正，否则记入 `attention`
 
    - **italic_missing**：读取所在章节上下文，判断是否为模板指导语，
      若是则用 Edit 补充斜体标记 `*...*`
@@ -171,7 +173,7 @@ python <skill-path>/scripts/docs2md.py <input.doc|input.docx> -o md/ --report
 
 3. **残留噪音识别**：脚本未覆盖的边缘模式（如非标准格式的封面残留），识别后移除
 
-4. **表格格式转换与对齐修正**：将 grid table / old-style table 转换为 GFM pipe 格式；修正列对齐
+4. **表格异常残留处理**：阶段1 已将表格标准化为 GFM pipe 格式；若仍残留 grid table / old-style table / 列对齐错误，视为脚本异常或复杂表格降级风险，能机械修正时修正，无法确认时记入 `attention`
 
 5. **模板指导语斜体还原**：同一章节内其他指导语为斜体时，补充遗漏的斜体标记
 
@@ -217,7 +219,7 @@ python <skill-path>/scripts/docs2md.py <input.doc|input.docx> -o md/ --report
 1. 首行为 `# 原文件名`（H1 文档标题）
 2. 正文标题从 H2 开始，无 H1 级正文标题
 3. 无 `![`、`{.mark}`、`{.underline}`、`[]{#` 残留
-4. 表格均为 GFM pipe 格式（无 `+---+` 或 `--- ---`）
+4. 表格均为 GFM pipe 格式（无 `+---+`、`--- ---` 或 HTML `<table>`）
 5. 实质内容未被修改（仅格式变化）
 
 ## 详细规则参考（按需查阅，勿预先全部读取）

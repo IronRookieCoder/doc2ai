@@ -143,11 +143,17 @@ def convert_doc_via_external_script(doc_path: Path) -> tuple[Path | None, str | 
 def run_pandoc(docx_path: Path, output_path: Path) -> bool:
     """Run Pandoc to convert .docx to markdown. Returns True on success."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    table_filter = Path(__file__).resolve().parent / "gfm-table-normalize.lua"
+    if not table_filter.exists():
+        print(f"ERROR: Table normalization filter not found: {table_filter}", file=sys.stderr)
+        return False
+
     cmd = [
         "pandoc", str(docx_path),
         "-t", "markdown",
         "--wrap=none",
         "--track-changes=accept",
+        "--lua-filter", str(table_filter),
         "-o", str(output_path),
     ]
     try:
@@ -654,6 +660,7 @@ _TERMINAL_PUNCT_RE = re.compile(r"[。；：！？.;:!?\)）》」』\]】]\s*$"
 _STRUCTURAL_LINE_RE = re.compile(r"^(#{1,6}\s|[-*+]\s|\d+\.\s|\||\s*$|```|>)")
 _GRID_TABLE_RE = re.compile(r"^\+[-=+]+\+")
 _OLD_STYLE_TABLE_RE = re.compile(r"^\s*-{3,}\s+-{3,}")
+_PIPE_TABLE_SEPARATOR_RE = re.compile(r"^\|(?:\s*:?-{3,}:?\s*\|)+$")
 _NOISE_PATTERNS = [
     (re.compile(r"\{\.(?:mark|underline|smallcaps|strikeout)\}"), "pandoc_annotation"),
     (re.compile(r"^!\["), "image_remnant"),
@@ -736,7 +743,7 @@ def scan_risks(text: str) -> dict:
     for i, line in enumerate(lines):
         stripped = line.strip()
         if stripped.startswith("|") and stripped.endswith("|"):
-            if i + 1 < len(lines) and re.match(r"^\|[\s:|-]+\|$", lines[i + 1].strip()):
+            if i + 1 < len(lines) and _PIPE_TABLE_SEPARATOR_RE.match(lines[i + 1].strip()):
                 cols_header = stripped.count("|") - 1
                 cols_sep = lines[i + 1].strip().count("|") - 1
                 if cols_header != cols_sep:
