@@ -30,6 +30,15 @@ doc/docx
   -> 最终 Markdown
 ```
 
+### Markdown 长文档转 AI Native 结构
+
+```text
+/doc2ai:md2ai input.md
+/doc2ai:md2ai md/ -o ai-native/
+```
+
+`md2ai` 技能将超过 500 行的 Markdown 长文档拆分为主入口 TOC 和多个子文档，默认输出到 `ai-native/`。它会生成 `risk-index.json`，让 AI 只针对高风险子文档做精准核实，避免把全文塞入上下文窗口。
+
 ### Excel 表格转 CSV
 
 ```text
@@ -44,6 +53,7 @@ doc/docx
 | 技能 | 命令 | 说明 |
 | --- | --- | --- |
 | `docs2md` | `/doc2ai:docs2md` | 将 `.doc` / `.docx` 文档转换为结构化 Markdown |
+| `md2ai` | `/doc2ai:md2ai` | 将 Markdown 长文档拆分为 AI Native 主入口和子文档 |
 | `xlsx2csv` | `/doc2ai:xlsx2csv` | 将 `.xlsx` 工作簿转换为 AI 友好的 CSV 集合 |
 
 ## 依赖
@@ -87,6 +97,20 @@ md/
     └── document.json
 ```
 
+### AI Native Markdown 输出
+
+```text
+ai-native/
+└── document/
+    ├── document.md
+    ├── 用户需求.md
+    ├── 功能性需求.md
+    ├── manifest.json
+    └── risk-index.json
+```
+
+目录批量处理会保留输入目录的相对层级。`risk-index.json` 用于指导 AI 只读取需要核实的子文档和局部行号。
+
 ### CSV 输出
 
 ```text
@@ -120,6 +144,9 @@ skills/
 │   ├── config.yaml
 │   ├── scripts/
 │   └── references/
+├── md2ai/
+│   ├── SKILL.md
+│   └── scripts/
 └── xlsx2csv/
     ├── SKILL.md
     ├── config.yaml
@@ -128,7 +155,7 @@ skills/
 
 ## 注意事项
 
-- 两个技能都支持目录输入。
+- 三个技能都支持目录输入。
 - 批量转换会保留输入目录的相对层级，避免同名文件互相覆盖。
 - 会跳过 `~$` 开头的 Office 临时文件。
 - 内置脚本支持中文路径和中文文件名。

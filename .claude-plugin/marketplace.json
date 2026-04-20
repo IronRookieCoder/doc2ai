@@ -4,13 +4,13 @@
     "name": "demo"
   },
   "metadata": {
-    "description": "doc2ai marketplace entry for converting office documents into AI-friendly Markdown and CSV formats",
+    "description": "doc2ai marketplace entry for converting office documents and long Markdown into AI-friendly document formats",
     "version": "1.0.0"
   },
   "plugins": [
     {
       "name": "doc2ai",
-      "description": "Document conversion plugin that converts doc/docx files to structured Markdown and xlsx workbooks to AI-friendly CSV collections",
+      "description": "Document conversion plugin that converts doc/docx files to structured Markdown, splits long Markdown into AI Native document sets, and converts xlsx workbooks to AI-friendly CSV collections",
       "source": "./"
     }
   ]

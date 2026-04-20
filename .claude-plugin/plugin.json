@@ -1,6 +1,6 @@
 {
   "name": "doc2ai",
-  "description": "Document conversion plugin for AI workflows - Convert Word documents to structured Markdown and Excel workbooks to AI-friendly CSV collections",
+  "description": "Document conversion plugin for AI workflows - Convert Word documents to structured Markdown, split long Markdown into AI Native document sets, and convert Excel workbooks to AI-friendly CSV collections",
   "version": "1.0.0",
   "author": {
     "name": "demo"

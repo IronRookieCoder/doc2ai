@@ -30,6 +30,15 @@ doc/docx
   -> final Markdown
 ```
 
+### Convert Long Markdown to AI Native Structure
+
+```text
+/doc2ai:md2ai input.md
+/doc2ai:md2ai md/ -o ai-native/
+```
+
+The `md2ai` skill splits Markdown files longer than 500 lines into a main TOC entry plus focused child documents under `ai-native/`. It also writes `risk-index.json` so AI can verify only risky child documents and local line ranges instead of loading the whole file into context.
+
 ### Convert Spreadsheets to CSV
 
 ```text
@@ -44,6 +53,7 @@ The `xlsx2csv` skill converts `.xlsx` files into an index CSV plus one CSV file 
 | Skill | Command | Description |
 | --- | --- | --- |
 | `docs2md` | `/doc2ai:docs2md` | Convert `.doc` / `.docx` documents into structured Markdown |
+| `md2ai` | `/doc2ai:md2ai` | Split long Markdown into an AI Native TOC and child documents |
 | `xlsx2csv` | `/doc2ai:xlsx2csv` | Convert `.xlsx` workbooks into AI-friendly CSV collections |
 
 ## Dependencies
@@ -87,6 +97,20 @@ md/
     └── document.json
 ```
 
+### AI Native Markdown Output
+
+```text
+ai-native/
+└── document/
+    ├── document.md
+    ├── User requirements.md
+    ├── Functional requirements.md
+    ├── manifest.json
+    └── risk-index.json
+```
+
+Batch processing preserves relative input subdirectories. `risk-index.json` tells AI which child documents and local line ranges need focused verification.
+
 ### CSV Output
 
 ```text
@@ -120,6 +144,9 @@ skills/
 │   ├── config.yaml
 │   ├── scripts/
 │   └── references/
+├── md2ai/
+│   ├── SKILL.md
+│   └── scripts/
 └── xlsx2csv/
     ├── SKILL.md
     ├── config.yaml
@@ -128,7 +155,7 @@ skills/
 
 ## Notes
 
-- Directory input is supported for both skills.
+- Directory input is supported for all three skills.
 - Batch conversion preserves relative subdirectories to avoid filename collisions.
 - Office temporary files starting with `~$` are skipped.
 - Chinese paths and filenames are supported by the bundled scripts.
