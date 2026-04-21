@@ -37,7 +37,7 @@ doc/docx
 /doc2ai:md2ai md/ -o ai-native/
 ```
 
-The `md2ai` skill splits Markdown files longer than 500 lines into a main TOC entry plus focused child documents under `ai-native/`. It also writes `risk-index.json` so AI can verify only risky child documents and local line ranges instead of loading the whole file into context.
+The `md2ai` skill splits Markdown files longer than 500 lines into a main TOC entry plus focused child documents under `ai-native/`. During processing it can use a risk index so AI verifies only risky child documents and local line ranges; final delivery removes process JSON files.
 
 ### Convert Spreadsheets to CSV
 
@@ -105,11 +105,10 @@ ai-native/
     ├── document.md
     ├── User requirements.md
     ├── Functional requirements.md
-    ├── manifest.json
-    └── risk-index.json
+    └── Non-functional requirements.md
 ```
 
-Batch processing preserves relative input subdirectories. `risk-index.json` tells AI which child documents and local line ranges need focused verification.
+Batch processing preserves relative input subdirectories. `manifest.json`, `risk-index.json`, and `summary.json` are process files used during verification and removed before final delivery.
 
 ### CSV Output
 

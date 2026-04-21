@@ -37,7 +37,7 @@ doc/docx
 /doc2ai:md2ai md/ -o ai-native/
 ```
 
-`md2ai` 技能将超过 500 行的 Markdown 长文档拆分为主入口 TOC 和多个子文档，默认输出到 `ai-native/`。它会生成 `risk-index.json`，让 AI 只针对高风险子文档做精准核实，避免把全文塞入上下文窗口。
+`md2ai` 技能将超过 500 行的 Markdown 长文档拆分为主入口 TOC 和多个子文档，默认输出到 `ai-native/`。处理期间会使用风险索引让 AI 只针对高风险子文档做精准核实，最终交付目录会删除过程 JSON 文件。
 
 ### Excel 表格转 CSV
 
@@ -105,11 +105,10 @@ ai-native/
     ├── document.md
     ├── 用户需求.md
     ├── 功能性需求.md
-    ├── manifest.json
-    └── risk-index.json
+    └── 非功能性需求.md
 ```
 
-目录批量处理会保留输入目录的相对层级。`risk-index.json` 用于指导 AI 只读取需要核实的子文档和局部行号。
+目录批量处理会保留输入目录的相对层级。`manifest.json`、`risk-index.json` 和 `summary.json` 只作为处理期间的过程文件，最终交付前删除。
 
 ### CSV 输出
 

@@ -604,7 +604,7 @@ def copy_short_document(
     relative_source: Path,
     lines: list[str],
     risks: list[dict],
-) -> Path:
+) -> tuple[Path, int, int]:
     output_path = output_root / relative_source
     output_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(input_path, output_path)
@@ -622,7 +622,7 @@ def copy_short_document(
     ]
     write_manifest(output_path.parent, input_path, len(lines), Path(relative_source.name), docs, risks, "copy")
     write_risk_index(output_path.parent, input_path, risks)
-    return output_path
+    return output_path, len(risks), len(docs)
 
 
 def split_long_document(
@@ -631,7 +631,7 @@ def split_long_document(
     relative_source: Path,
     lines: list[str],
     max_lines: int,
-) -> Path:
+) -> tuple[Path, int, int]:
     allocator = NameAllocator()
     doc_title = sanitize_name(input_path.stem)
     doc_dir = output_root / relative_source.parent / doc_title
@@ -723,7 +723,7 @@ def split_long_document(
     )
     write_manifest(doc_dir, input_path, len(lines), main_rel_path, docs, risks, "split")
     write_risk_index(doc_dir, input_path, risks)
-    return main_path
+    return main_path, len(risks), len(docs)
 
 
 def discover_markdown_files(input_path: Path, output_root: Path) -> tuple[list[Path], Path | None]:
@@ -758,18 +758,37 @@ def process_file(
     risks: list[dict] = []
 
     if len(lines) <= threshold and not force:
-        output_path = copy_short_document(input_path, output_root, relative_source, lines, risks)
+        output_path, risk_count, document_count = copy_short_document(input_path, output_root, relative_source, lines, risks)
         mode = "copy"
     else:
-        output_path = split_long_document(input_path, output_root, relative_source, lines, max_lines)
+        output_path, risk_count, document_count = split_long_document(input_path, output_root, relative_source, lines, max_lines)
         mode = "split"
 
     return {
         "source": str(input_path),
         "output": str(output_path),
         "line_count": len(lines),
+        "document_count": document_count,
+        "risk_count": risk_count,
         "mode": mode,
     }
+
+
+def cleanup_process_files(output_root: Path, results: list[dict]) -> int:
+    """删除处理期间生成的 JSON 过程文件。"""
+    targets: set[Path] = {output_root / "summary.json"}
+    for result in results:
+        output_path = Path(result["output"])
+        doc_dir = output_path.parent
+        targets.add(doc_dir / "manifest.json")
+        targets.add(doc_dir / "risk-index.json")
+
+    deleted = 0
+    for target in sorted(targets, key=lambda path: str(path)):
+        if target.exists():
+            target.unlink()
+            deleted += 1
+    return deleted
 
 
 def main() -> int:
@@ -783,16 +802,22 @@ def main() -> int:
     parser.add_argument("--threshold", type=int, default=500, help="超过多少行视为长文档，默认 500")
     parser.add_argument("--max-lines-per-doc", type=int, default=500, help="拆分后单个子文档目标最大行数，默认 500")
     parser.add_argument("--force", action="store_true", help="即使未超过阈值也生成主入口 + 子文档结构")
+    parser.add_argument(
+        "--cleanup-process-files",
+        action="store_true",
+        help="处理完成后删除 manifest.json、risk-index.json 和 summary.json",
+    )
     args = parser.parse_args()
 
     input_path = resolve_path(args.input)
     output_root = resolve_path(args.output_dir)
-    output_root.mkdir(parents=True, exist_ok=True)
 
     files, input_root = discover_markdown_files(input_path, output_root)
     if not files:
         print(f"未找到 Markdown 文件：{input_path}", file=sys.stderr)
         return 1
+
+    output_root.mkdir(parents=True, exist_ok=True)
 
     results = []
     failures = []
@@ -800,7 +825,10 @@ def main() -> int:
         try:
             result = process_file(path, output_root, input_root, args.threshold, args.max_lines_per_doc, args.force)
             results.append(result)
-            print(f"[{result['mode']}] {path} -> {result['output']} ({result['line_count']} 行)")
+            print(
+                f"[{result['mode']}] {path} -> {result['output']} "
+                f"({result['line_count']} 行, {result['document_count']} 个文档, {result['risk_count']} 个风险)"
+            )
         except Exception as exc:  # noqa: BLE001
             failures.append({"source": str(path), "error": str(exc)})
             print(f"[failed] {path}: {exc}", file=sys.stderr)
@@ -812,9 +840,13 @@ def main() -> int:
         "results": results,
         "failures": failures,
     }
-    write_text(output_root / "summary.json", json.dumps(summary, ensure_ascii=False, indent=2))
     print(f"\n完成：成功 {len(results)}，失败 {len(failures)}")
-    print(f"汇总文件：{output_root / 'summary.json'}")
+    if args.cleanup_process_files:
+        deleted = cleanup_process_files(output_root, results)
+        print(f"已清理过程文件：{deleted} 个")
+    else:
+        write_text(output_root / "summary.json", json.dumps(summary, ensure_ascii=False, indent=2))
+        print(f"汇总文件：{output_root / 'summary.json'}")
     return 0 if not failures else 2
 
 
