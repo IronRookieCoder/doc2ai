@@ -209,7 +209,155 @@ def ooxml_fallback(docx_path: Path) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# 3. TOC extraction — build heading number map before removing TOC
+# 3. Embedded attachment scan
+# ---------------------------------------------------------------------------
+
+_EMBEDDED_REL_TYPES = {
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject": "ole_object",
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/package": "package",
+}
+_ATTACHMENT_EXTENSIONS = {
+    ".bin", ".doc", ".docx", ".docm", ".xls", ".xlsx", ".xlsm",
+    ".ppt", ".pptx", ".pptm", ".pdf", ".zip", ".7z", ".rar",
+}
+_CONTENT_TYPE_EXTENSIONS = {
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.ms-excel": ".xls",
+    "application/vnd.ms-excel.sheet.macroEnabled.12": ".xlsm",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/msword": ".doc",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "application/vnd.ms-powerpoint": ".ppt",
+    "application/pdf": ".pdf",
+    "application/zip": ".zip",
+    "application/vnd.openxmlformats-officedocument.oleObject": ".bin",
+}
+
+
+def _read_zip_text(z: zipfile.ZipFile, name: str) -> str | None:
+    """Read a UTF-8-ish text member from a docx zip package."""
+    try:
+        return z.read(name).decode("utf-8", errors="replace")
+    except KeyError:
+        return None
+
+
+def _load_content_types(z: zipfile.ZipFile) -> dict[str, str]:
+    """Return {part_name: content_type} entries from [Content_Types].xml."""
+    xml_content = _read_zip_text(z, "[Content_Types].xml")
+    if not xml_content:
+        return {}
+
+    try:
+        root = ET.fromstring(xml_content)
+    except ET.ParseError:
+        return {}
+
+    content_types = {}
+    for override in root.findall("{http://schemas.openxmlformats.org/package/2006/content-types}Override"):
+        part_name = override.attrib.get("PartName", "").lstrip("/")
+        content_type = override.attrib.get("ContentType", "")
+        if part_name and content_type:
+            content_types[part_name] = content_type
+    return content_types
+
+
+def _scan_relationship_targets(z: zipfile.ZipFile) -> dict[str, dict]:
+    """Return relationship metadata keyed by normalized target path."""
+    relationships = {}
+    rel_ns = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+
+    for name in z.namelist():
+        if not name.endswith(".rels"):
+            continue
+        xml_content = _read_zip_text(z, name)
+        if not xml_content:
+            continue
+        try:
+            root = ET.fromstring(xml_content)
+        except ET.ParseError:
+            continue
+
+        base_dir = Path(name).parent.parent.as_posix()
+        for rel in root.findall(f"{rel_ns}Relationship"):
+            rel_type = rel.attrib.get("Type", "")
+            target = rel.attrib.get("Target", "")
+            if rel_type not in _EMBEDDED_REL_TYPES or not target:
+                continue
+            if target.startswith("/"):
+                target_path = target.lstrip("/")
+            else:
+                target_path = (Path(base_dir) / target).as_posix()
+            relationships[target_path] = {
+                "relationship_id": rel.attrib.get("Id", ""),
+                "relationship_type": _EMBEDDED_REL_TYPES[rel_type],
+                "relationship_source": name,
+            }
+    return relationships
+
+
+def _infer_attachment_extension(path: str, content_type: str) -> str:
+    """Infer the original extension when OOXML only exposes a generic part name."""
+    suffix = Path(path).suffix.lower()
+    if suffix and suffix != ".bin":
+        return suffix
+    return _CONTENT_TYPE_EXTENSIONS.get(content_type, suffix or "")
+
+
+def scan_embedded_attachments(docx_path: Path) -> dict:
+    """
+    Scan a .docx package for embedded attachments/OLE objects.
+
+    The scanner only reports presence and metadata. It does not extract or
+    convert attachment contents.
+    """
+    try:
+        with zipfile.ZipFile(docx_path) as z:
+            names = set(z.namelist())
+            content_types = _load_content_types(z)
+            relationships = _scan_relationship_targets(z)
+    except zipfile.BadZipFile:
+        return {"total": 0, "items": []}
+
+    candidate_paths = {
+        name for name in names
+        if name.startswith("word/embeddings/")
+        and Path(name).suffix.lower() in _ATTACHMENT_EXTENSIONS
+    }
+    candidate_paths.update(path for path in relationships if path.startswith("word/embeddings/"))
+
+    items = []
+    for index, path in enumerate(sorted(candidate_paths), start=1):
+        content_type = content_types.get(path, "")
+        rel = relationships.get(path, {})
+        extension = _infer_attachment_extension(path, content_type)
+        relationship_type = rel.get("relationship_type", "")
+        risk = "embedded_attachment_not_converted"
+        if extension == ".bin" or relationship_type == "ole_object":
+            risk = "embedded_ole_object_not_converted"
+
+        items.append({
+            "id": index,
+            "type": "embedded_attachment",
+            "name": Path(path).name,
+            "path": path,
+            "extension": extension,
+            "content_type": content_type,
+            "relationship_type": relationship_type,
+            "relationship_id": rel.get("relationship_id", ""),
+            "relationship_source": rel.get("relationship_source", ""),
+            "risk": risk,
+            "message": "Embedded attachment is not converted into Markdown; confirm whether it needs separate extraction.",
+        })
+
+    return {
+        "total": len(items),
+        "items": items,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 4. TOC extraction — build heading number map before removing TOC
 # ---------------------------------------------------------------------------
 
 # TOC entry patterns:
@@ -247,7 +395,7 @@ def extract_toc_map(lines: list[str]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# 4. Front-page detection and removal
+# 5. Front-page detection and removal
 # ---------------------------------------------------------------------------
 
 _TOC_ANCHOR_RE = re.compile(r"\[\]\{#_Toc\d+\s*\.anchor\}")
@@ -342,7 +490,7 @@ def find_front_page_end(lines: list[str], patterns: dict) -> int:
 
 
 # ---------------------------------------------------------------------------
-# 5. Noise cleanup (regex rules)
+# 6. Noise cleanup (regex rules)
 # ---------------------------------------------------------------------------
 
 def cleanup_noise(text: str, config: dict) -> str:
@@ -417,7 +565,7 @@ def cleanup_noise(text: str, config: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 6. Heading processing
+# 7. Heading processing
 # ---------------------------------------------------------------------------
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)$", re.MULTILINE)
@@ -576,7 +724,7 @@ def restore_heading_numbers(text: str, toc_map: list[dict], config: dict) -> tup
 
 
 # ---------------------------------------------------------------------------
-# 7. Heading spacing normalization
+# 8. Heading spacing normalization
 # ---------------------------------------------------------------------------
 
 def normalize_heading_spacing(text: str) -> str:
@@ -604,7 +752,7 @@ def normalize_heading_spacing(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 8. Document title insertion
+# 9. Document title insertion
 # ---------------------------------------------------------------------------
 
 def make_doc_title(docx_path: Path) -> str:
@@ -614,7 +762,7 @@ def make_doc_title(docx_path: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 9. Heading number validation
+# 10. Heading number validation
 # ---------------------------------------------------------------------------
 
 def validate_heading_numbers(text: str) -> list[str]:
@@ -653,7 +801,7 @@ def validate_heading_numbers(text: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# 10. Risk scanning for Stage 2 targeted processing
+# 11. Risk scanning for Stage 2 targeted processing
 # ---------------------------------------------------------------------------
 
 _TERMINAL_PUNCT_RE = re.compile(r"[。；：！？.;:!?\)）》」』\]】]\s*$")
@@ -938,15 +1086,31 @@ def convert_one(source_path: Path, output_dir: Path, config: dict, input_root: P
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(text)
 
-    # Stage 1i: Scan risks for Stage 2 targeted processing
+    # Stage 1i: Scan Markdown risks and OOXML embedded attachments
+    attachment_scan = scan_embedded_attachments(docx_path)
+    if attachment_scan["total"] > 0:
+        report["script_result"]["embedded_attachments"] = attachment_scan["total"]
+        report["attention"].append(
+            f"Detected {attachment_scan['total']} embedded attachment(s); "
+            "attachment contents were not converted into Markdown"
+        )
+        print(f"  WARNING: Embedded attachments detected: {attachment_scan['total']}")
+        for item in attachment_scan["items"]:
+            extension = item["extension"] or "unknown"
+            print(f"    - {item['path']} ({extension})")
+        print("  Attachment contents are not converted into Markdown; confirm whether separate extraction is needed.")
+
     scan = scan_risks(text)
     scan["source"] = f"{name_no_ext}.md"
+    scan["total_attachment_risks"] = attachment_scan["total"]
+    scan["attachments"] = attachment_scan
     scan_path = output_subdir / f"{name_no_ext}.scan.json"
     with open(scan_path, "w", encoding="utf-8") as f:
         json.dump(scan, f, ensure_ascii=False, indent=2)
     report["scan_result"] = {
         "total_risks": scan["total_risks"],
         "total_regions": scan["total_regions"],
+        "total_attachments": attachment_scan["total"],
         "scan_path": str(scan_path),
     }
 

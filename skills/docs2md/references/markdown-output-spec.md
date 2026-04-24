@@ -128,6 +128,7 @@ Pandoc 可能丢失部分段落的斜体标记。当同一章节内其他模板�
 - 标题编号序列异常（跳号、重复）
 - 标题层级超出 H6 限制
 - 疑似残留的非正文内容
+- 嵌入附件或 OLE 对象未转换进 Markdown（如 `.xlsx`、`.docx`、`.pdf`、`oleObject*.bin`）
 
 ## 输出文件命名
 
@@ -150,7 +151,8 @@ Pandoc 可能丢失部分段落的斜体标记。当同一章节内其他模板�
   "script_result": {
     "status": "success | failed",
     "output_md": "路径/文件名.md",
-    "preconverted_docx": "路径/文件名.docx"
+    "preconverted_docx": "路径/文件名.docx",
+    "embedded_attachments": 1
   },
   "ai_result": {
     "status": "success | failed",
@@ -166,6 +168,7 @@ Pandoc 可能丢失部分段落的斜体标记。当同一章节内其他模板�
 **字段规则**：
 - `attention`：仅在存在内容疑点时填充，无疑点时为空数组或省略
 - `script_result.preconverted_docx`：仅在输入为 `.doc` 且预转换成功时出现
+- `script_result.embedded_attachments`：仅在检测到嵌入附件或 OLE 对象时出现；附件内容不会自动进入 Markdown
 - `ai_result.changes`：记录 AI 阶段所有格式修改，每条包含类型、章节、详情
 - `conversion_result`：`success` 表示两阶段均成功；任一阶段失败则为 `failed`
 
@@ -184,4 +187,5 @@ Pandoc 可能丢失部分段落的斜体标记。当同一章节内其他模板�
 | 7 | 表格为 GFM pipe 格式 | 不含 `+---+` grid table、`--- ---` old-style table 或 HTML `<table>` |
 | 8 | 模板指导语保留斜体 | 斜体标记 `*...*` 完整 |
 | 9 | 无断裂段落 | 同一语义段落在同一行内 |
-| 10 | 实质内容未被修改 | 与原文逐段比对，仅格式变化 |
+| 10 | 附件风险已提示 | 若 `.scan.json.attachments.total > 0`，已提示用户附件内容未转换 |
+| 11 | 实质内容未被修改 | 与原文逐段比对，仅格式变化 |

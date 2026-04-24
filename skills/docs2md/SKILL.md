@@ -75,7 +75,8 @@ python <skill-path>/scripts/docs2md.py <input.doc|input.docx> -o md/ --report
 6. 还原标题编号（TOC 映射法 → 层级计数法 → 不还原）
 7. 插入文档级 H1 标题（文件名去扩展名）
 8. 标题层级整体下移一级（H1→H2, H2→H3, ...）
-9. 输出 `.md` 文件和 `.scan.json` 风险索引（供阶段2 靶向处理）
+9. 扫描 `.docx` 包中的嵌入附件/OLE 对象（如 `.xlsx`、`.docx`、`.pdf`、`oleObject*.bin`），仅记录风险，不自动提取或转换附件内容
+10. 输出 `.md` 文件和 `.scan.json` 风险索引（供阶段2 靶向处理）
 
 脚本输出路径：
 - 单文件输入：`<output-dir>/<原文件名>.md`
@@ -100,14 +101,15 @@ python <skill-path>/scripts/docs2md.py <input.doc|input.docx> -o md/ --report
 检查脚本是否生成了 `.scan.json`（与 `.md` 同目录）：
 
 - **`.scan.json` 存在且 `total_risks > 0`**：按「3b. 靶向修复」处理
-- **`.scan.json` 存在且 `total_risks == 0`**：无需 AI 处理，`.md` 已是最终输出，删除 `.scan.json` 即可
+- **`.scan.json` 存在且 `attachments.total > 0`**：提示用户文档包含嵌入附件，附件内容未进入 Markdown；如用户需要附件内容，应单独提取或转换附件
+- **`.scan.json` 存在且 `total_risks == 0` 且 `attachments.total == 0`**：无需 AI 处理，`.md` 已是最终输出，删除 `.scan.json` 即可
 - **`.scan.json` 不存在**（旧版脚本兼容）：按「3c. 回退方案」处理
 
 #### 3b. 靶向修复协议
 
 **第一步：读取风险索引**
 
-读取 `.scan.json`（通常 < 5KB），了解风险数量（`total_risks`）、区域数量（`total_regions`）和分布。
+读取 `.scan.json`，了解 Markdown 风险数量（`total_risks`）、区域数量（`total_regions`）、附件风险数量（`total_attachment_risks`）和分布。若 `attachments.total > 0`，先向用户提示附件未转换；附件风险不通过 region 修复。
 
 **第二步：按 region 逐组处理**
 
@@ -139,6 +141,10 @@ python <skill-path>/scripts/docs2md.py <input.doc|input.docx> -o md/ --report
      若是则用 Edit 补充斜体标记 `*...*`
 
 3. 每次 Edit 操作后继续处理下一个 region
+
+**附件风险处理**
+
+若 `.scan.json.attachments.total > 0`，不修改 `.md`。根据 `.scan.json.attachments.items` 向用户提示嵌入附件路径、类型和“未转换进 Markdown”的事实；如需要附件内容，需另行提取或转换附件源文件。
 
 **第三步：清理**
 - 删除 `.scan.json`
@@ -203,7 +209,7 @@ python <skill-path>/scripts/docs2md.py <input.doc|input.docx> -o md/ --report
 }
 ```
 
-`attention` 数组记录需要人工关注的问题，如标题编号异常、层级超限、可疑内容等。仅在失败、跳过或存在疑点时增加对应字段。
+`attention` 数组记录需要人工关注的问题，如标题编号异常、层级超限、可疑内容、嵌入附件未转换等。仅在失败、跳过或存在疑点时增加对应字段。
 `script_result.preconverted_docx` 仅在输入为 `.doc` 且预转换成功时出现。
 
 ### 步骤 5：输出批次汇总
@@ -220,7 +226,8 @@ python <skill-path>/scripts/docs2md.py <input.doc|input.docx> -o md/ --report
 2. 正文标题从 H2 开始，无 H1 级正文标题
 3. 无 `![`、`{.mark}`、`{.underline}`、`[]{#` 残留
 4. 表格均为 GFM pipe 格式（无 `+---+`、`--- ---` 或 HTML `<table>`）
-5. 实质内容未被修改（仅格式变化）
+5. 若 `.scan.json.attachments.total > 0`，已提示用户附件内容未进入 Markdown
+6. 实质内容未被修改（仅格式变化）
 
 ## 详细规则参考（按需查阅，勿预先全部读取）
 
@@ -271,3 +278,4 @@ md/
 - **单文件失败不中断批次**：记录错误到 JSON 报告，继续处理下一个文件
 - **编码**：`.doc` 先另存为 `.docx`，`.docx` 按 ZIP+XML 处理；Pandoc 产出统一 UTF-8
 - **中文路径与文件名**：脚本使用绝对 `Path` 和参数列表调用子进程，支持中文目录、中文文件名和嵌套子目录
+- **嵌入附件**：`.docx` 按 ZIP+OOXML 扫描 `word/embeddings/` 和关系文件；直接嵌入的 `.xlsx`、`.docx`、`.pdf` 等可记录扩展名，`oleObject*.bin` 仅能稳定识别为 OLE 嵌入对象，需人工确认原始类型
