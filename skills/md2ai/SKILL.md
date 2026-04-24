@@ -2,9 +2,8 @@
 name: md2ai
 description: >
   将较长的 Markdown 文档整理为 AI 友好的渐进式披露结构。超过 500 行的长文档会被拆成
-  主入口 TOC + 多个子文档，默认输出到 ai-native/；处理期间可用 risk-index.json 供 AI 精准核实，
-  最终交付前删除过程文件。
-  当用户提到"优化 md 长文档""markdown 拆分""长文档 AI 读取""生成 ai-native""主入口 TOC"
+  主入口 TOC + 多个子文档，默认输出到当前目录；过程文件默认自动删除。
+  当用户提到"优化 md 长文档""markdown 拆分""长文档 AI 读取""主入口 TOC"
   "渐进式披露""把大 markdown 拆成子文档"时触发。即使用户只是给出 .md 文件或目录并说明
   后续要交给 AI 阅读、审查、分析，也应使用此 skill。
 ---
@@ -16,7 +15,7 @@ description: >
 把单个或批量 Markdown 文档整理成适合 AI 逐层读取的结构。主入口保持文档形态，只放标题和目录；`manifest.json`、`risk-index.json` 和 `summary.json` 只作为处理期间的过程文件，最终交付前删除。
 
 ```text
-ai-native/
+./
 └── 文档名/
     ├── 文档名.md          # 主入口，包含 TOC 和读取说明
     ├── 用户需求.md
@@ -37,11 +36,11 @@ ai-native/
 
 | 参数 | 说明 | 示例 |
 | --- | --- | --- |
-| `-o <dir>` / `--output-dir <dir>` | 指定输出目录，默认 `ai-native/` | `/md2ai docs/ -o ai-native/` |
+| `-o <dir>` / `--output-dir <dir>` | 指定输出目录，默认当前目录 `.` | `/md2ai docs/ -o output/` |
 | `--threshold <n>` | 超过多少行视为长文档，默认 `500` | `/md2ai a.md --threshold 800` |
 | `--max-lines-per-doc <n>` | 拆分后单个子文档的目标最大行数，默认 `500` | `/md2ai a.md --max-lines-per-doc 400` |
 | `--force` | 即使未超过阈值也生成主入口 + 子文档结构 | `/md2ai a.md --force` |
-| `--cleanup-process-files` | 脚本运行结束后删除 `manifest.json`、`risk-index.json` 和 `summary.json`。仅在无需读取风险索引或已完成风险核实时使用 | `/md2ai a.md --cleanup-process-files` |
+| `--keep-process-files` | 保留 `manifest.json`、`risk-index.json` 和 `summary.json` 过程文件。默认不保留 | `/md2ai a.md --keep-process-files` |
 
 ## 执行流程
 
@@ -49,14 +48,14 @@ ai-native/
 
 - 用户可能给出单个 `.md` 文件、目录或文件列表。
 - 目录输入时递归扫描 `.md` 文件，保留相对目录层级。
-- 跳过输出目录本身，避免重复处理已生成的 `ai-native/` 文件。
+- 当用户指定的输出目录位于输入目录内部时，跳过输出目录本身，避免重复处理已生成文件。
 
 ### 步骤 2：运行脚本拆分
 
-默认输出到当前目录下的 `ai-native/`：
+默认输出到当前目录：
 
 ```bash
-python <skill-path>/scripts/split_long_md.py <input.md|dir> -o ai-native/
+python <skill-path>/scripts/split_long_md.py <input.md|dir>
 ```
 
 如果用户指定输出目录，使用用户指定值：
@@ -65,10 +64,10 @@ python <skill-path>/scripts/split_long_md.py <input.md|dir> -o ai-native/
 python <skill-path>/scripts/split_long_md.py <input.md|dir> -o <用户指定目录>
 ```
 
-如果已经确认不需要保留过程 JSON，或已经完成风险核实，可追加：
+如需排查拆分结果或人工核实风险，可追加 `--keep-process-files` 临时保留过程 JSON：
 
 ```bash
-python <skill-path>/scripts/split_long_md.py <input.md|dir> -o <用户指定目录> --cleanup-process-files
+python <skill-path>/scripts/split_long_md.py <input.md|dir> --keep-process-files
 ```
 
 脚本会：
@@ -79,14 +78,14 @@ python <skill-path>/scripts/split_long_md.py <input.md|dir> -o <用户指定目�
 5. 无可用标题时，按固定行数切片，并把该情况写入风险索引。
 6. 跳过只包含标题和空行的无效概述片段。
 7. 生成 `manifest.json` 和 `risk-index.json`，供处理期间核实使用。
-8. 风险核实完成后删除 `manifest.json`、`risk-index.json` 和批处理 `summary.json`。
+8. 默认删除 `manifest.json`、`risk-index.json` 和批处理 `summary.json`。
 
 ### 步骤 3：检查风险索引
 
-脚本完成后，先读取每个输出文档目录下的 `risk-index.json`，不要直接读取全文。`risk-index.json` 是过程文件，只在风险核实期间保留。
+默认执行时脚本会删除过程文件。只有使用 `--keep-process-files` 时，才读取每个输出文档目录下的 `risk-index.json` 做精准核实。
 
 风险索引为空：
-- 向用户汇总输出路径、主入口文件和拆分数量，然后删除过程文件。
+- 向用户汇总输出路径、主入口文件和拆分数量。
 
 风险索引非空：
 - 按 `risks` 数组逐项处理。
@@ -131,7 +130,7 @@ python <skill-path>/scripts/split_long_md.py <input.md|dir> -o <用户指定目�
 单文件输入：
 
 ```text
-ai-native/
+./
 └── SFRD-REQM-03-5.4_XX项目XX模块系统需求规格说明书/
     ├── SFRD-REQM-03-5.4_XX项目XX模块系统需求规格说明书.md
     ├── 用户需求.md
@@ -146,7 +145,7 @@ docs/
 └── 需求/
     └── 模块A.md
 
-ai-native/
+./
 └── 需求/
     └── 模块A/
         ├── 模块A.md

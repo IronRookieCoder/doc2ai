@@ -4,8 +4,8 @@
 将长 Markdown 文档拆分为 AI 友好的主入口 + 子文档结构。
 
 用法：
-    python split_long_md.py <input.md|dir> -o ai-native/
-    python split_long_md.py docs/ -o ai-native/ --threshold 500 --max-lines-per-doc 500
+    python split_long_md.py <input.md|dir>
+    python split_long_md.py docs/ --threshold 500 --max-lines-per-doc 500
 """
 
 from __future__ import annotations
@@ -607,7 +607,8 @@ def copy_short_document(
 ) -> tuple[Path, int, int]:
     output_path = output_root / relative_source
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(input_path, output_path)
+    if input_path.resolve() != output_path.resolve():
+        shutil.copy2(input_path, output_path)
     rel_path = Path(relative_source.name)
     detect_leaf_risks(lines, rel_path, risks, input_path, 1)
     docs = [
@@ -727,6 +728,9 @@ def split_long_document(
 
 
 def discover_markdown_files(input_path: Path, output_root: Path) -> tuple[list[Path], Path | None]:
+    input_path = input_path.resolve()
+    output_root = output_root.resolve()
+
     if input_path.is_file():
         if input_path.suffix.lower() != ".md":
             return [], None
@@ -739,7 +743,7 @@ def discover_markdown_files(input_path: Path, output_root: Path) -> tuple[list[P
     for path in sorted(input_path.rglob("*.md"), key=lambda p: str(p.relative_to(input_path)).casefold()):
         if path.name.startswith("."):
             continue
-        if is_relative_to(path, output_root):
+        if output_root != input_path and is_relative_to(output_root, input_path) and is_relative_to(path, output_root):
             continue
         files.append(path.resolve())
     return files, input_path
@@ -798,14 +802,14 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("input", help="输入的 .md 文件或包含 .md 的目录")
-    parser.add_argument("-o", "--output-dir", default="ai-native", help="输出目录，默认 ai-native/")
+    parser.add_argument("-o", "--output-dir", default=".", help="输出目录，默认当前目录")
     parser.add_argument("--threshold", type=int, default=500, help="超过多少行视为长文档，默认 500")
     parser.add_argument("--max-lines-per-doc", type=int, default=500, help="拆分后单个子文档目标最大行数，默认 500")
     parser.add_argument("--force", action="store_true", help="即使未超过阈值也生成主入口 + 子文档结构")
     parser.add_argument(
-        "--cleanup-process-files",
+        "--keep-process-files",
         action="store_true",
-        help="处理完成后删除 manifest.json、risk-index.json 和 summary.json",
+        help="保留 manifest.json、risk-index.json 和 summary.json 过程文件（默认删除）",
     )
     args = parser.parse_args()
 
@@ -841,12 +845,12 @@ def main() -> int:
         "failures": failures,
     }
     print(f"\n完成：成功 {len(results)}，失败 {len(failures)}")
-    if args.cleanup_process_files:
-        deleted = cleanup_process_files(output_root, results)
-        print(f"已清理过程文件：{deleted} 个")
-    else:
+    if args.keep_process_files:
         write_text(output_root / "summary.json", json.dumps(summary, ensure_ascii=False, indent=2))
         print(f"汇总文件：{output_root / 'summary.json'}")
+    else:
+        deleted = cleanup_process_files(output_root, results)
+        print(f"已清理过程文件：{deleted} 个")
     return 0 if not failures else 2
 
 

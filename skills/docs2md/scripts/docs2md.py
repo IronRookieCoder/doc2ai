@@ -960,7 +960,7 @@ def convert_one(source_path: Path, output_dir: Path, config: dict, input_root: P
 def main():
     parser = argparse.ArgumentParser(description="docs2md Stage 1: Convert .doc/.docx to .md")
     parser.add_argument("input", help="Input .doc/.docx file or directory containing .doc/.docx files")
-    parser.add_argument("-o", "--output-dir", default=".", help="Output directory (default: current dir)")
+    parser.add_argument("-o", "--output-dir", default="md", help="Output directory (default: ./md)")
     parser.add_argument("--config", default=None, help="Config file path (default: config.yaml in skill directory)")
     parser.add_argument("--report", action="store_true", help="Generate JSON reports in <output-dir>/reports/")
     args = parser.parse_args()
