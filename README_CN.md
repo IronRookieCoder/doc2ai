@@ -19,25 +19,42 @@ claude plugin install doc2ai
 /doc2ai:docs2md input.docx
 /doc2ai:docs2md input.doc -o md/
 /doc2ai:docs2md docs/ --report
+/doc2ai:docs2md input.docx --config custom.yaml
 ```
 
 `docs2md` 技能将 `.doc` 和 `.docx` 文件转换为结构化 Markdown。它采用两阶段管道：
 
 ```text
 doc/docx
-  -> 脚本转换与清洗
-  -> AI 靶向格式修复
+  -> 脚本转换与清洗（Pandoc + Lua filter + 正则）
+  -> AI 靶向格式修复（仅修改风险标记区域）
   -> 最终 Markdown
 ```
+
+| 参数 | 说明 | 默认值 |
+| --- | --- | --- |
+| `-o <dir>` | 指定 Markdown 输出目录 | `md/` |
+| `--config <path>` | 指定配置文件路径 | skill 目录下的 `config.yaml` |
+| `--report` | 生成 JSON 转换报告 | 不生成 |
 
 ### Markdown 长文档转 AI Native 结构
 
 ```text
 /doc2ai:md2ai input.md
 /doc2ai:md2ai md/ -o ai-native/
+/doc2ai:md2ai input.md --threshold 800
+/doc2ai:md2ai input.md --force
 ```
 
-`md2ai` 技能将超过 500 行的 Markdown 长文档拆分为主入口 TOC 和多个子文档，默认输出到 `ai-native/`。处理期间会使用风险索引让 AI 只针对高风险子文档做精准核实，最终交付目录会删除过程 JSON 文件。
+`md2ai` 技能将超过阈值行数（默认 500 行）的 Markdown 长文档拆分为主入口 TOC 和多个子文档，默认输出到当前目录。处理期间会使用风险索引让 AI 只针对高风险子文档做精准核实，最终交付目录会删除过程 JSON 文件。
+
+| 参数 | 说明 | 默认值 |
+| --- | --- | --- |
+| `-o <dir>` | 指定输出目录 | 当前目录 `.` |
+| `--threshold <n>` | 超过多少行视为长文档 | `500` |
+| `--max-lines-per-doc <n>` | 拆分后单个子文档的目标最大行数 | `500` |
+| `--force` | 即使未超过阈值也生成主入口 + 子文档结构 | 否 |
+| `--keep-process-files` | 保留 `manifest.json`、`risk-index.json` 和 `summary.json` 过程文件 | 不保留 |
 
 ### Excel 表格转 CSV
 
@@ -47,6 +64,10 @@ doc/docx
 ```
 
 `xlsx2csv` 技能将 `.xlsx` 文件转换为索引 CSV 和多个工作表 CSV。它保留原始网格结构，不做语义归一化。
+
+| 参数 | 说明 | 默认值 |
+| --- | --- | --- |
+| `-o <dir>` | 指定 CSV 输出目录 | `csv/` |
 
 ## 技能
 
@@ -98,6 +119,19 @@ md/
 ```
 
 ### AI Native Markdown 输出
+
+默认输出到当前目录，按文档名创建子目录：
+
+```text
+./
+└── document/
+    ├── document.md
+    ├── 用户需求.md
+    ├── 功能性需求.md
+    └── 非功能性需求.md
+```
+
+指定 `-o ai-native/` 时输出到该目录：
 
 ```text
 ai-native/
@@ -158,3 +192,5 @@ skills/
 - 批量转换会保留输入目录的相对层级，避免同名文件互相覆盖。
 - 会跳过 `~$` 开头的 Office 临时文件。
 - 内置脚本支持中文路径和中文文件名。
+- `xlsx2csv` 默认不导出隐藏工作表，可通过 `config.yaml` 中的 `sheet.include_hidden_sheets` 配置开启。
+- `docs2md` 处理 `.doc` 文件时，同目录下若已存在同名 `.docx`，会优先使用 `.docx` 并跳过 `.doc`，避免重复输出。
