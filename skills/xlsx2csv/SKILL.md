@@ -1,19 +1,24 @@
 ---
 name: xlsx2csv
 description: >
-  将 xlsx 文件转换为 AI 友好的 CSV 集合。输出同名目录，内含简化索引 CSV 和多个工作表 CSV，
+  将 xls/xlsx 文件转换为 AI 友好的 CSV 集合。输出同名目录，内含简化索引 CSV 和多个工作表 CSV，
   保留原始网格结构，不做归一化。当用户提到 xlsx 转 CSV、Excel 数据提取、工作表导出、
-  xlsx 文件处理、表格数据转换，或者需要把 Excel 文件转成文本/CSV 方便后续分析时，
-  都应使用此 skill。即使用户没有说"转CSV"，只要涉及读取或处理 xlsx 文件内容，也应考虑使用。
+  xls/xlsx 文件处理、表格数据转换，或者需要把 Excel 文件转成文本/CSV 方便后续分析时，
+  都应使用此 skill。即使用户没有说"转CSV"，只要涉及读取或处理 Excel 文件内容，也应考虑使用。
 ---
 
 # xlsx2csv
 
-将 `.xlsx` 文件转换为一组 CSV 文件，输出结构清晰、可直接被 AI 或脚本消费。支持单文件或目录批量转换。
+将 `.xls`/`.xlsx` 文件转换为一组 CSV 文件，输出结构清晰、可直接被 AI 或脚本消费。支持单文件或目录批量转换。
 
 ## 前置依赖
 
 脚本依赖 `pandas`、`python-calamine` 和 `pyyaml`。如果缺少依赖，先 `pip install` 安装。
+
+处理 `.xls` 时会先预转换为 `.xlsx`：
+- Windows 环境优先调用 WPS 表格 COM，也兼容 Microsoft Excel COM，需要 `pywin32`
+- 非 Windows 环境调用 LibreOffice/soffice
+- 预转换中间文件写入当前目录下的 `test/xlsx2csv_tmp/`，转换结束后自动清理
 
 ## 调用参数
 
@@ -28,7 +33,8 @@ description: >
 ### 步骤 1：确定待转换文件
 
 - 用户可能给出单个文件路径、目录路径或文件列表
-- 如果给出目录，脚本自动递归扫描其中所有 `.xlsx` 文件（包含嵌套子目录，跳过 `~$` 开头的临时文件）
+- 如果给出目录，脚本自动递归扫描其中所有 `.xls`/`.xlsx` 文件（包含嵌套子目录，跳过 `~$` 开头的临时文件）
+- 如果同一目录下同时存在同名 `.xls` 和 `.xlsx`，优先处理 `.xlsx`，跳过 `.xls`，避免重复输出
 - 确认文件列表后开始逐文件处理
 
 ### 步骤 2：确定输出目录
@@ -42,6 +48,12 @@ description: >
 
 ```bash
 python <skill-path>/scripts/convert.py <输入文件.xlsx> -o csv/
+```
+
+`.xls` 文件使用同一入口：
+
+```bash
+python <skill-path>/scripts/convert.py <输入文件.xls> -o csv/
 ```
 
 如用户传入 `-o <dir>`，则使用指定目录：
@@ -128,6 +140,7 @@ csv/
 ## 容错
 
 - **文件损坏或密码保护**：脚本报错并跳过，不中断批量处理中的其他文件
+- **旧版 `.xls` 文件**：脚本先预转换为 `.xlsx` 再导出 CSV；如果缺少 WPS/Excel/LibreOffice 或 `pywin32`，会报告预转换失败原因
 - **单文件失败不中断批次**：记录错误原因，继续处理下一个文件，最终汇总成功/失败计数
 - **工作表名冲突**：多个工作表名 sanitize 后重复时（如 `Sheet/1` 和 `Sheet:1` 都变为 `Sheet_1`），自动追加序号（`Sheet_1_2`）避免覆盖
 - **编码**：输出 CSV 使用 UTF-8 with BOM 编码，确保中文在 Excel 中直接打开不乱码
