@@ -292,8 +292,24 @@ def _scan_relationship_targets(z: zipfile.ZipFile) -> dict[str, dict]:
                 "relationship_id": rel.attrib.get("Id", ""),
                 "relationship_type": _EMBEDDED_REL_TYPES[rel_type],
                 "relationship_source": name,
+                "relationship_part": _relationship_source_to_part(name),
             }
     return relationships
+
+
+def _relationship_source_to_part(source: str) -> str:
+    """Convert a .rels package path to the XML part that owns it."""
+    if not source.endswith(".rels"):
+        return ""
+
+    source_path = Path(source)
+    rels_dir = source_path.parent
+    if rels_dir.name != "_rels":
+        return ""
+
+    owner_dir = rels_dir.parent
+    owner_name = source_path.name[:-5]
+    return (owner_dir / owner_name).as_posix()
 
 
 def _infer_attachment_extension(path: str, content_type: str) -> str:
@@ -302,6 +318,152 @@ def _infer_attachment_extension(path: str, content_type: str) -> str:
     if suffix and suffix != ".bin":
         return suffix
     return _CONTENT_TYPE_EXTENSIONS.get(content_type, suffix or "")
+
+
+def _xml_attr_local_name(attr_name: str) -> str:
+    if "}" in attr_name:
+        return attr_name.rsplit("}", 1)[1]
+    return attr_name
+
+
+def _element_uses_relationship_id(element: ET.Element, relationship_id: str) -> bool:
+    """Return True when an OOXML element subtree references the given rId."""
+    if not relationship_id:
+        return False
+
+    for node in element.iter():
+        for attr_name, attr_value in node.attrib.items():
+            if attr_value == relationship_id and _xml_attr_local_name(attr_name) == "id":
+                return True
+    return False
+
+
+def _element_text(element: ET.Element) -> str:
+    """Collect visible text from an OOXML element subtree."""
+    text_parts = []
+    for node in element.iter():
+        if node.text:
+            text_parts.append(node.text)
+    return re.sub(r"\s+", " ", "".join(text_parts)).strip()
+
+
+def _part_type(part_name: str) -> str:
+    name = Path(part_name).name.lower()
+    if part_name == "word/document.xml":
+        return "body"
+    if name.startswith("header"):
+        return "header"
+    if name.startswith("footer"):
+        return "footer"
+    if name in {"footnotes.xml", "endnotes.xml", "comments.xml"}:
+        return name.removesuffix(".xml")
+    return "unknown"
+
+
+def _location_not_found(part_name: str, relationship_id: str) -> dict:
+    return {
+        "found": False,
+        "part": part_name,
+        "part_type": _part_type(part_name) if part_name else "",
+        "relationship_id": relationship_id,
+        "message": "Attachment relationship exists, but its anchor was not found in a scanned document part.",
+    }
+
+
+def _scan_table_for_relationship(
+    table: ET.Element,
+    relationship_id: str,
+    part_name: str,
+    block_index: int,
+    table_index: int,
+) -> dict | None:
+    w_ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+    for row_index, row in enumerate(table.findall(f"{w_ns}tr"), start=1):
+        for cell_index, cell in enumerate(row.findall(f"{w_ns}tc"), start=1):
+            for paragraph_index, paragraph in enumerate(cell.findall(f".//{w_ns}p"), start=1):
+                if _element_uses_relationship_id(paragraph, relationship_id):
+                    return {
+                        "found": True,
+                        "part": part_name,
+                        "part_type": _part_type(part_name),
+                        "block_index": block_index,
+                        "table_index": table_index,
+                        "table_row": row_index,
+                        "table_cell": cell_index,
+                        "cell_paragraph_index": paragraph_index,
+                        "nearby_text": _element_text(cell)[:300],
+                    }
+    return None
+
+
+def _locate_relationship_in_part(z: zipfile.ZipFile, part_name: str, relationship_id: str) -> dict:
+    """Locate the block/table cell that owns an embedded attachment relationship."""
+    xml_content = _read_zip_text(z, part_name)
+    if not xml_content or not relationship_id:
+        return _location_not_found(part_name, relationship_id)
+
+    try:
+        root = ET.fromstring(xml_content)
+    except ET.ParseError:
+        return _location_not_found(part_name, relationship_id)
+
+    w_ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    paragraph_count = 0
+    table_count = 0
+    body = root.find(f".//{w_ns}body")
+    blocks = list(body) if body is not None else list(root)
+
+    for block_index, block in enumerate(blocks, start=1):
+        if block.tag == f"{w_ns}p":
+            paragraph_count += 1
+            if _element_uses_relationship_id(block, relationship_id):
+                return {
+                    "found": True,
+                    "part": part_name,
+                    "part_type": _part_type(part_name),
+                    "block_index": block_index,
+                    "paragraph_index": paragraph_count,
+                    "nearby_text": _element_text(block)[:300],
+                }
+        elif block.tag == f"{w_ns}tbl":
+            table_count += 1
+            location = _scan_table_for_relationship(
+                block,
+                relationship_id,
+                part_name,
+                block_index,
+                table_count,
+            )
+            if location:
+                return location
+
+    if _element_uses_relationship_id(root, relationship_id):
+        return {
+            "found": True,
+            "part": part_name,
+            "part_type": _part_type(part_name),
+            "nearby_text": _element_text(root)[:300],
+            "message": "Attachment anchor found in this part, but not in a body paragraph or table cell.",
+        }
+
+    return _location_not_found(part_name, relationship_id)
+
+
+def _locate_attachment(z: zipfile.ZipFile, rel: dict) -> dict:
+    """Return document location metadata for an embedded attachment relation."""
+    relationship_id = rel.get("relationship_id", "")
+    part_name = rel.get("relationship_part", "")
+    if not relationship_id or not part_name:
+        return {
+            "found": False,
+            "part": part_name,
+            "part_type": _part_type(part_name) if part_name else "",
+            "relationship_id": relationship_id,
+            "message": "Attachment has no relationship anchor metadata.",
+        }
+
+    return _locate_relationship_in_part(z, part_name, relationship_id)
 
 
 def scan_embedded_attachments(docx_path: Path) -> dict:
@@ -316,44 +478,61 @@ def scan_embedded_attachments(docx_path: Path) -> dict:
             names = set(z.namelist())
             content_types = _load_content_types(z)
             relationships = _scan_relationship_targets(z)
+
+            items = []
+            candidate_paths = {
+                name for name in names
+                if name.startswith("word/embeddings/")
+                and Path(name).suffix.lower() in _ATTACHMENT_EXTENSIONS
+            }
+            candidate_paths.update(path for path in relationships if path.startswith("word/embeddings/"))
+
+            for index, path in enumerate(sorted(candidate_paths), start=1):
+                content_type = content_types.get(path, "")
+                rel = relationships.get(path, {})
+                extension = _infer_attachment_extension(path, content_type)
+                relationship_type = rel.get("relationship_type", "")
+                risk = "embedded_attachment_not_converted"
+                if extension == ".bin" or relationship_type == "ole_object":
+                    risk = "embedded_ole_object_not_converted"
+
+                items.append({
+                    "id": index,
+                    "type": "embedded_attachment",
+                    "name": Path(path).name,
+                    "path": path,
+                    "extension": extension,
+                    "content_type": content_type,
+                    "relationship_type": relationship_type,
+                    "relationship_id": rel.get("relationship_id", ""),
+                    "relationship_source": rel.get("relationship_source", ""),
+                    "relationship_part": rel.get("relationship_part", ""),
+                    "location": _locate_attachment(z, rel),
+                    "risk": risk,
+                    "message": "Embedded attachment is not converted into Markdown; confirm whether it needs separate extraction.",
+                })
     except zipfile.BadZipFile:
         return {"total": 0, "items": []}
-
-    candidate_paths = {
-        name for name in names
-        if name.startswith("word/embeddings/")
-        and Path(name).suffix.lower() in _ATTACHMENT_EXTENSIONS
-    }
-    candidate_paths.update(path for path in relationships if path.startswith("word/embeddings/"))
-
-    items = []
-    for index, path in enumerate(sorted(candidate_paths), start=1):
-        content_type = content_types.get(path, "")
-        rel = relationships.get(path, {})
-        extension = _infer_attachment_extension(path, content_type)
-        relationship_type = rel.get("relationship_type", "")
-        risk = "embedded_attachment_not_converted"
-        if extension == ".bin" or relationship_type == "ole_object":
-            risk = "embedded_ole_object_not_converted"
-
-        items.append({
-            "id": index,
-            "type": "embedded_attachment",
-            "name": Path(path).name,
-            "path": path,
-            "extension": extension,
-            "content_type": content_type,
-            "relationship_type": relationship_type,
-            "relationship_id": rel.get("relationship_id", ""),
-            "relationship_source": rel.get("relationship_source", ""),
-            "risk": risk,
-            "message": "Embedded attachment is not converted into Markdown; confirm whether it needs separate extraction.",
-        })
 
     return {
         "total": len(items),
         "items": items,
     }
+
+
+def _format_attachment_location(location: dict) -> str:
+    """Return a compact human-readable attachment location for logs."""
+    if not location.get("found"):
+        return location.get("part") or "location unknown"
+
+    if location.get("table_index"):
+        return (
+            f"{location.get('part')} table {location.get('table_index')}, "
+            f"row {location.get('table_row')}, cell {location.get('table_cell')}"
+        )
+    if location.get("paragraph_index"):
+        return f"{location.get('part')} paragraph {location.get('paragraph_index')}"
+    return location.get("part") or "location unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -1097,7 +1276,8 @@ def convert_one(source_path: Path, output_dir: Path, config: dict, input_root: P
         print(f"  WARNING: Embedded attachments detected: {attachment_scan['total']}")
         for item in attachment_scan["items"]:
             extension = item["extension"] or "unknown"
-            print(f"    - {item['path']} ({extension})")
+            location = _format_attachment_location(item.get("location", {}))
+            print(f"    - {item['path']} ({extension}) at {location}")
         print("  Attachment contents are not converted into Markdown; confirm whether separate extraction is needed.")
 
     scan = scan_risks(text)

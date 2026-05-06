@@ -19,25 +19,42 @@ claude plugin install doc2ai
 /doc2ai:docs2md input.docx
 /doc2ai:docs2md input.doc -o md/
 /doc2ai:docs2md docs/ --report
+/doc2ai:docs2md input.docx --config custom.yaml
 ```
 
 The `docs2md` skill converts `.doc` and `.docx` files into structured Markdown. It uses a two-stage pipeline:
 
 ```text
 doc/docx
-  -> script conversion and cleanup
-  -> targeted AI formatting repair
+  -> script conversion and cleanup (Pandoc + Lua filter + regex)
+  -> targeted AI formatting repair (only risk-flagged regions)
   -> final Markdown
 ```
+
+| Parameter | Description | Default |
+| --- | --- | --- |
+| `-o <dir>` | Markdown output directory | `md/` |
+| `--config <path>` | Path to configuration file | `config.yaml` in the skill directory |
+| `--report` | Generate a JSON conversion report | not generated |
 
 ### Convert Long Markdown to AI Native Structure
 
 ```text
 /doc2ai:md2ai input.md
 /doc2ai:md2ai md/ -o ai-native/
+/doc2ai:md2ai input.md --threshold 800
+/doc2ai:md2ai input.md --force
 ```
 
-The `md2ai` skill splits Markdown files longer than 500 lines into a main TOC entry plus focused child documents under `ai-native/`. During processing it can use a risk index so AI verifies only risky child documents and local line ranges; final delivery removes process JSON files.
+The `md2ai` skill splits Markdown files longer than the configured threshold (default 500 lines) into a main TOC entry plus focused child documents. Output goes to the current directory by default. During processing it uses a risk index so AI verifies only risky child documents; process JSON files are removed before final delivery.
+
+| Parameter | Description | Default |
+| --- | --- | --- |
+| `-o <dir>` | Output directory | current directory `.` |
+| `--threshold <n>` | Line count above which a file is treated as long | `500` |
+| `--max-lines-per-doc <n>` | Target maximum lines per child document | `500` |
+| `--force` | Generate TOC + child structure even below the threshold | off |
+| `--keep-process-files` | Keep `manifest.json`, `risk-index.json`, and `summary.json` | not kept |
 
 ### Convert Spreadsheets to CSV
 
@@ -47,6 +64,10 @@ The `md2ai` skill splits Markdown files longer than 500 lines into a main TOC en
 ```
 
 The `xlsx2csv` skill converts `.xlsx` files into an index CSV plus one CSV file per worksheet. It preserves the original grid layout and avoids semantic normalization.
+
+| Parameter | Description | Default |
+| --- | --- | --- |
+| `-o <dir>` | CSV output directory | `csv/` |
 
 ## Skills
 
@@ -98,6 +119,19 @@ md/
 ```
 
 ### AI Native Markdown Output
+
+Output goes to the current directory by default, creating a subdirectory named after the document:
+
+```text
+./
+└── document/
+    ├── document.md
+    ├── User requirements.md
+    ├── Functional requirements.md
+    └── Non-functional requirements.md
+```
+
+When `-o ai-native/` is specified:
 
 ```text
 ai-native/
@@ -158,3 +192,5 @@ skills/
 - Batch conversion preserves relative subdirectories to avoid filename collisions.
 - Office temporary files starting with `~$` are skipped.
 - Chinese paths and filenames are supported by the bundled scripts.
+- `xlsx2csv` skips hidden worksheets by default. Set `sheet.include_hidden_sheets: true` in `config.yaml` to export them.
+- When converting `.doc` files, `docs2md` skips the `.doc` if a matching `.docx` already exists in the same directory to avoid duplicate outputs.
